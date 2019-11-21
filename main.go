@@ -19,6 +19,7 @@ var (
 	// It is provided at build time via -ldflags="-X main.Version=VERSION".
 	Version        = "dev"
 	showVersion    = flag.Bool("v", false, "Output version and exit")
+	liveMode       = flag.Bool("l", false, "Enable live mode")
 	addr           = flag.String("a", ":9000", "TCP listen address")
 	urlPath        = flag.String("p", "/", "URL path")
 	boundary       = flag.String("b", "ffmpeg", "Multipart boundary")
@@ -40,14 +41,18 @@ func parseArgs() {
 func registerClient(w io.Writer) {
 	if clients.Add(w) == 1 {
 		// First client added, start the recording.
-		stopRecording, _ = startRecording(command, args, clients)
+		if !*liveMode {
+			stopRecording, _ = startRecording(command, args, clients)
+		}
 	}
 }
 
 func deregisterClient(w io.Writer) {
 	if clients.Remove(w) == 0 {
 		// Last client removed, stop the recording.
-		stopRecording()
+		if !*liveMode {
+			stopRecording()
+		}
 	}
 }
 
@@ -96,5 +101,14 @@ func main() {
 	}
 	clients = multi.NewMapWriter()
 	startRecording = recording.Start
-	log.Fatalln(http.ListenAndServe(*addr, http.HandlerFunc(requestHandler)))
+	if *liveMode {
+		go func() {
+			log.Fatalln(http.ListenAndServe(*addr, http.HandlerFunc(requestHandler)))
+		}()
+		_, wait := startRecording(command, args, clients)
+		log.Println("Waiting end")
+		wait()
+	} else {
+		log.Fatalln(http.ListenAndServe(*addr, http.HandlerFunc(requestHandler)))
+	}
 }
